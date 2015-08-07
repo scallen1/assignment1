@@ -1,0 +1,350 @@
+---
+title: "Assignment 1"
+author: "Stephen Allen"
+date: "August 5, 2015"
+output: html_document
+---
+
+
+First we load the Georgia2000 data set and view a summary.  Note that variables other than votes, ballots and bush/gore are all dummy variables.  We also create a variable for percentage of misscounted votes.  Amazingly as many as 23% of votes were miscounted in one county!
+
+
+```{r}
+georgia = read.csv('georgia2000.csv', header=TRUE)
+attach(georgia)
+summary(georgia)
+MisCount=(ballots-votes)/votes
+summary(MisCount)
+```
+
+Next we look at the plots of miscounted votes versus certain statistics about those counties. It is hard to distinguish clear implications from these plots although it sees that miscounted votes seem to occur more frewuently in poor and rural communities.
+
+```{r, echo=FALSE}
+plot(MisCount,perAA)
+plot(MisCount,poor)
+plot(MisCount,urban)
+plot(MisCount, equip)
+logvotes=log(votes)
+plot(MisCount, logvotes)
+```
+
+Finally we run a simple linear regression to see what variables have significant relationships with the response, MisCount.  As it turns out, there appear to be more miscouned votes in poor areas and the error rate is higher in areas that record a large number of votes.  It also seems that optical voting equipment has a higher error rate than other equipment.  
+It also turns out that optical equipment is actually used less frequently in more African American Communities.
+
+```{r}
+linear.votes = lm(MisCount~ .-county,georgia)
+summary(linear.votes)
+plot(equip,perAA)
+```
+
+
+
+
+
+
+
+...........................................................................
+
+Now let us consider 3 portfolio options.  We will create 3 portfolios out of financial assests:
+US domestic equities (SPY: the S&P 500 stock index)
+US Treasury bonds (TLT)
+Investment-grade corporate bonds (LQD)
+Emerging-market equities (EEM)
+Real estate (VNQ)
+
+First we load in the appropriate data:
+```{r}
+library(fImport)
+library(foreach)
+library(mosaic)
+mystocks = c("SPY", "TLT", "LQD", "EEM", "VNQ")
+myprices = yahooSeries(mystocks, from='2011-01-01', to='2015-07-30')
+head(myprices)
+```
+
+Then we convert the daily price data to daily returns data for bootstrapping:
+```{r}
+YahooPricesToReturns = function(series) {
+  mycols = grep('Adj.Close', colnames(series))
+  closingprice = series[,mycols]
+  N = nrow(closingprice)
+  percentreturn = as.data.frame(closingprice[2:N,]) / as.data.frame(closingprice[1:(N-1),]) - 1
+  mynames = strsplit(colnames(percentreturn), '.', fixed=TRUE)
+  mynames = lapply(mynames, function(x) return(paste0(x[1], ".PctReturn")))
+  colnames(percentreturn) = mynames
+  as.matrix(na.omit(percentreturn))
+}
+myreturns = YahooPricesToReturns(myprices)
+```
+
+We are going to consider short term outcomes over a 4 week trading period using bootstrapping so let us initialize our time frame.
+
+```{r}
+n_days=20
+```
+
+Good, now we should choose the weights by which we wil invest either in a safe portfolio, an even distribution among our 5 financial tools or a more risky and volatile tool.  weight.even is self explanatory.  
+weights.safer diverts some funds from riskier investments into the comparatively safe treasury bills and high rated bonds.
+weights.fun is the potentially deceptively named investment portfolio that takes greater risks through less diversification and diverting funds away from the safer bonds into more risky equities
+
+```{r}
+weights.even = c(0.2, 0.2, 0.2, 0.2, 0.2)
+weights.safer = c(.1, .4, .3, .1, .1)
+weights.fun = c(0.3, 0, 0, 0.5, 0.2)
+set.seed(1)
+```
+
+Now let us bootstrap these to see what possible outcomes can be expected.  For that we create three functions named sim.(fundname).  Below is shown sim.even, sim.fun and sim.safer.  They are identical except for the part in which they use different investment weights.
+
+```{r}
+sim.even = foreach(i=1:5000, .combine='rbind') %do% {
+  totalwealth = 100000
+  wealthtracker.even = rep(0, n_days) 
+  for(today in 1:n_days) {
+    holdings.even = weights.even * totalwealth
+    return.today = resample(myreturns, 1, orig.ids=FALSE)
+    holdings.even = holdings.even + holdings.even*return.today
+    totalwealth = sum(holdings.even)
+    wealthtracker.even[today] = totalwealth
+  }
+  wealthtracker.even
+}
+
+
+```
+
+```{r, echo=FALSE}
+sim.fun = foreach(i=1:5000, .combine='rbind') %do% {
+  totalwealth = 100000
+  wealthtracker.fun = rep(0, n_days) 
+  for(today in 1:n_days) {
+    holdings.fun = weights.fun * totalwealth
+    return.today = resample(myreturns, 1, orig.ids=FALSE)
+    holdings.fun = holdings.fun + holdings.fun*return.today
+    totalwealth = sum(holdings.fun)
+    wealthtracker.fun[today] = totalwealth
+  }
+  wealthtracker.fun
+}
+
+
+sim.safer = foreach(i=1:5000, .combine='rbind') %do% {
+  totalwealth = 100000
+  wealthtracker.safer = rep(0, n_days) 
+  for(today in 1:n_days) {
+    holdings.safer = weights.safer * totalwealth
+    return.today = resample(myreturns, 1, orig.ids=FALSE)
+    holdings.safer = holdings.safer + holdings.safer*return.today
+    totalwealth = sum(holdings.safer)
+    wealthtracker.safer[today] = totalwealth
+  }
+  wealthtracker.safer
+}
+```
+
+Now let us view the output of a these simulations.  First we will consider the histogram of sim.even.  We see that it appears that most of the possible outcomes are bunched around the middle.
+
+```{r,echo=FALSE}
+hist(sim.even[,n_days], 25)
+```
+
+Let's look at that middle.  The below number is the average total wealth at the end of the simulations.  Remember that the initial investment was 100,000
+
+```{r}
+mean(sim.even[,n_days])
+```
+
+And let's look at the quartiles.  This shows us the median result, the middle 50% of results and the best and worst result that occurred in this simulation.
+
+```{r}
+quantile(sim.even[,n_days])
+```
+
+And finally if we want to consider the riskiness of this option, we will look at the 5% risk.  This tells us what value we can expect to outperform with 95% confidence by taking this investment approach for a given 20 investment day period based on our bootstrap.
+
+```{r}
+quantile(sim.even[,n_days],.05)
+```
+
+Now let us look at the histogram for the safer option sim.safer.  We see that it again is concentrated in the middle, if slightly more so.
+
+```{r, echo=FALSE}
+hist(sim.safer[,n_days], 25)
+```
+
+Let's look at that middle.  The below number is the average total wealth at the end of the simulations.  Remember that the initial investment was 100,000.  The result is comparable to the sim.even mean.  
+
+```{r}
+mean(sim.safer[,n_days])
+```
+
+So now let's look at it's quartiles.  This is the first place we can see a clear difference from the even splits.  Both the worst and best case scenarios are much less extreme.  The 25% and the 75% outcomes are also less extreme.  The median outcome is comparable to the original case.
+
+```{r,echo=FALSE}
+quantile(sim.safer[,n_days])
+```
+
+We will also loo at the 5% risk for this safer portfolio.  The risk is significanlty reduced with this portfolio as compared to the even splits.  
+
+```{r,echo=FALSE}
+quantile(sim.safer[,n_days],.05)
+```
+
+Finally let's consider the riskier portfolio and see whehter or not it lives up to it's name sim.fun.  First let us look at it's histogram.  It already has a noticably wider spread than the safer option.
+
+```{r,echo=FALSE}
+hist(sim.fun[,n_days], 50)
+```
+
+Let's look closer by first looking for it's mean. Though not very different, it is noticably a bit lower than the other two portfolios.
+
+```{r}
+mean(sim.fun[,n_days])
+```
+
+But let's look further at its quantiles. We can see that risk is far greater in this portfolio.  The worst case scenario is very much worse than in the safer portfolio and the best case scenario is much better.  It is also a bit more spread out at the middle and seems to skew a little bit towards lower returns.
+
+```{r, echo=FALSE}
+quantile(sim.fun[,n_days])
+```
+
+Finally we will look at the 5% quantile to get a better handle on it's risk.  The gap here is very significan, not just from the safer portfolio but also from the even split portfolio.
+
+```{r}
+quantile(sim.fun[,n_days],.05)
+```
+
+After considering all of this it seems that the portfolio generated by sim.safer is the preferred option of these 3.  It renders the equivalent or even better expected returns, both in median and mean, than either other option with significanly less risk.
+
+
+.............................................................................
+
+Now from stocks... to wine.  We want to see if we can have a computer classify wine by binary color - red or white -  given certain properties of the wine.  First let us load in the data and view a summary.
+
+```{r}
+wine = read.csv('wine.csv', header=TRUE)
+attach(wine)
+summary(wine)
+```
+
+Now we don't want the computer to include color as a predictor of well color nor are we interested in the subjective variable of quality.  So next we will truncate the data and normalise it.
+
+```{r}
+X = wine[,(1:11)]
+X = scale(X, center=TRUE, scale=TRUE)
+```
+
+Now that that is done we are ready to cluster the data with kmeans.  We will selet kmeans as 2 as we are trying to split the wines into a set of white and a set of red.  We can choose a very large nstart due to the relative simplicity of this problem.
+
+```{r}
+clust1 = kmeans(X, 2, nstart=2225)
+```
+
+Now let us look at a plot of the two clusters.  We will create bar plots of the color of the wine.  We will also color the portions of each bar by whether they are in cluster 1 or cluster 2.  The below plot may be difficult to read, and that is because the clustering did so well that both bars are almost entirely of one cluster!
+
+```{r}
+qplot(color, color=factor(clust1$cluster))
+```
+
+Now let us look at principal component analysis (PCA) to see how that compares to kmeans in splitting these wines into whites and reds.  Let's use the tools in r to find the principle components and use those to predict the color of the wine.  
+
+We see that the first principle component contains 95% of the total variance and the first two combined do more than 99%
+
+```{r,echo=FALSE}
+library(ggplot2)
+```
+```{r}
+pc1=prcomp(X)
+summary(pc1)
+```
+
+Now let us try to visualise how well these principal components split wines across color. We do this with a plot of PC1 scores and PC2 scores where the coloring of points is done by the color of the wine in question.
+
+There appears to be some seperation of whites (shown in blue) from reds (appropriately shown in red) based on principal component, but the split is not as clearly understood visually as it was in the last graph.
+
+```{r}
+scores = pc1$x
+qplot(scores[,1], scores[,2], color=color, xlab='Component 1', ylab='Component 2')
+```
+
+So now to compare the two and see whether principal component analysis or kmeans clustering more effectively splits the wines by color, we will use decision trees that use the clusters and principle components respectively to gauge the color of the wine.
+
+First we create and check a decision tree using the cluster.  This tree has only one split, and splits a tree by which cluster it is in.  And unsuprisingly, it has a very low misclassification rate.
+```{r}
+library(tree)
+colortree=tree(color~clust1$cluster)
+summary(colortree)
+```
+
+Now we create the tree for PCA.  This tree has more splits, based on the principle components distinguished earlier.  It also has a very low misclassification rate, however in this case the misclassification rate is almost twice as high for the PCA tree as for the kmeans tree.
+
+```{r}
+colortree2=tree(color~scores)
+summary(colortree2)
+```
+
+Our conclusion would be that kmeans seems to do a better job distinguising red wine from white wine in this dataset.
+
+
+
+................................................................................
+
+Vitamin Water has gathered a lot of data about social media accounts. To start, we must load the appropriate data.
+
+```{r}
+vitwater = read.csv('social_marketing.csv', header=TRUE)
+summary(vitwater)
+
+```
+
+
+Vitamin water does not target bots so first we remove the profiles that frequently post spam.  We can do this by sampling clustering groups based soley on spam removing this group.  You can see that after doing this, the spam max drops to 0.  At the same time some adult content is removed, the remaining users likely being real people.
+
+```{r}
+vitx=vitwater[,36]
+vitx = scale(vitx, center=TRUE, scale=TRUE)
+
+consumer_groups=kmeans(vitx,2, nstart = 4000)
+consumer_groups$centers
+vitwater=vitwater[-which(consumer_groups$cluster == 2),]
+
+summary(vitwater)
+```
+
+One can fairly assess that Vitamin Water's targeted consumers will be interested in certain categories: sports, nutrition, fitness and more. Now with this cleaner data, we should look for what groups may exist that fit Vitamin Water's target consumer.  We exclude spam and adult data as those are not categories with which Vitamin Water wants to be associated
+
+```{r}
+vitx=vitwater[,2:35]
+vitx=scale(vitx, center=TRUE, scale=TRUE)
+set.rseed(1)
+consumer_groups=kmeans(vitx,5, nstart = 500)
+consumer_groups$centers
+```
+
+Two groups are of particular interest.  
+
+First there are sports enthusiasts.  They are also likely to tweeet about food, family, religion, parenting and school.  This insight may inform Vitamin Water about marketing strategies to attract sports fans to the brand.  Potential avenues may be advertising during sporting events encouraging parents to give their children Vitamin Water for school and organised sports.
+
+```{r, echo=FALSE}
+consumer_groups$center[,7:8]
+consumer_groups$center[,9:10]
+consumer_groups$center[,27:31]
+```
+
+Second we will look at the tweeters interested in personal fitness and nutrition
+
+This group is much harder to pin down.  Beyond an interest in personal fitness and nutrition, the only other very strong tendency is to make post about the outdoors. Not as strong is their tendency to post ecological tweets but they are the group most likely to be make eco tweets.  It is reasonable to infer that in communicating with these target consumers, ads that feature healthy people in natural environments or promote green initiatives of the brand are likely to connect with these consumers.
+
+
+```{r,echo=FALSE}
+ecologic=consumer_groups$center[,16:32]
+subgrouper=ecologic[,-6]
+subgrouper=subgrouper[,-6]
+subgrouper=subgrouper[,-(7:13)]
+subgrouper
+```
+
+
+Other paths were considered.  It was considered possible that perhaps target customers (those who tweet about sports, health and fitness) could be predicted based on PCA of non targeted tweets: those not about sports health and fitness.  In tests, it was found that this method had very high error rates compared to guessing.  For example, when just considering the top 10% of tweeters in the targeted categories, the error rate of a decision tree based on PCA ran higher than 6%.  Guessing should result in a 10% error rate so 6% was not considered a strong enough indicator.
+
+It thus suggested that when seeking targeted consumers, tracking target tweet categories such as sports and health should be the focus and non target categories will not do much to inform Vitamin Water of what twitter accounts may be target consumers.
